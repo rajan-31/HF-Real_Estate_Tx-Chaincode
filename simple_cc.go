@@ -18,20 +18,22 @@ type SmartContract struct {
 
 type Admin_Super struct {
 	Password string `json:"password"`
-	Name     string `json:"name"` //  Inspector General of Registration
 	UID      string `json:"uid"`  //  Inspector General of Registration
+	Name     string `json:"name"` //  Inspector General of Registration
 }
 
 // OfficeCode: Tri letter unique code give to each Sub-Registrar's office
 type Admin_OfficeCode struct {
-	Password string `json:"password"`
-	UID      string `json:"uid"` // Sub-Registrar
+	Password  string   `json:"password"`
+	UID       string   `json:"uid"`       // Sub-Registrar
+	Name      string   `json:"name"`      // Sub-Registrar
+	ToApprove []string `json:"toApprove"` // transactions to approve
 }
 
 type User struct {
 	Password string   `json:"password"`
-	Name     string   `json:"name"`
 	UID      string   `json:"uid"`
+	Name     string   `json:"name"`
 	Status   int      `json:"status"` // 0/1/2 - Not verified/Verified/Suspended
 	Owned    []string `json:"owned"`
 }
@@ -49,7 +51,8 @@ type Transaction struct {
 	OfficeCode          string    `json:"officeCode"`          // Where estate resides
 	ApprovedBy          string    `json:"approvedBy"`          // uid
 	ApprovedDateTime    time.Time `json:"approvedDateTime"`
-	Price               int       `json:"price"` // accepted buy seller/owner
+	Price               int       `json:"price"`  // accepted buy seller/owner
+	Reason              string    `json:"reason"` // sell, inheritance, gift
 }
 
 type Estate struct {
@@ -64,6 +67,15 @@ type Estate struct {
 	Requests          []Request `json:"requests"`          // all request from buyers
 	BeingSold         bool      `json:"beingSold"`         // true when a request from buyer is accepted
 }
+
+// struct for events
+/*
+type Transaction_Event struct {
+	ServeyNo         string `json:"serveyNo"`
+	TransactionCount int    `json:"transactionCount"`
+	Transaction      Transaction
+}
+*/
 
 // ------------------------------------
 
@@ -143,22 +155,24 @@ func searchArray(arr []string, val string) int {
 
 // For Admin super
 
-func (s *SmartContract) CreateOrModify_Admin(ctx contractapi.TransactionContextInterface, _password string, officeCode string, newAdminPassword string, uid string) error {
+func (s *SmartContract) CreateOrModify_Admin(ctx contractapi.TransactionContextInterface, _username string, _password string, officeCode string, newAdminPassword string, uid string, name string) error {
 
-	verified, err0 := s.verifyPassword(ctx, "admin_super", _password)
+	verified, err0 := s.verifyPassword(ctx, _username, _password)
 
 	if err0 != nil {
 		return fmt.Errorf("verifyPassword >> Verify password %s", err0.Error())
 	} else if !verified {
-		return fmt.Errorf("CreateOrModify_Admin >> Password Missmatched for %s", "admin_super")
+		return fmt.Errorf("CreateOrModify_Admin >> Password Missmatched for %s", _username)
 	}
 
 	//=====================================
 
 	key := "admin_" + officeCode
 	data := Admin_OfficeCode{
-		Password: newAdminPassword,
-		UID:      uid,
+		Password:  newAdminPassword,
+		UID:       uid,
+		Name:      name,
+		ToApprove: []string{},
 	}
 
 	marshaled_data, _ := json.Marshal(data)
@@ -171,16 +185,7 @@ func (s *SmartContract) CreateOrModify_Admin(ctx contractapi.TransactionContextI
 
 // For Admin
 
-func (s *SmartContract) Create_User(ctx contractapi.TransactionContextInterface, _username string, _password string, uid string, newUserPassword string, name string) (User, error) {
-	verified, err0 := s.verifyPassword(ctx, _username, _password)
-
-	if err0 != nil {
-		return User{}, fmt.Errorf("verifyPassword >> Verify password %s", err0.Error())
-	} else if !verified {
-		return User{}, fmt.Errorf("Create_User >> Password Missmatched for %s", _username)
-	}
-
-	//=====================================
+func (s *SmartContract) Create_User(ctx contractapi.TransactionContextInterface, uid string, newUserPassword string, name string) (User, error) {
 
 	key := "user" + "_" + uid
 	data := User{
@@ -199,16 +204,7 @@ func (s *SmartContract) Create_User(ctx contractapi.TransactionContextInterface,
 	return data, nil
 }
 
-func (s *SmartContract) Modify_User(ctx contractapi.TransactionContextInterface, _username string, _password string, uid string, name string) (User, error) {
-	verified, err0 := s.verifyPassword(ctx, _username, _password)
-
-	if err0 != nil {
-		return User{}, fmt.Errorf("verifyPassword >> Verify password %s", err0.Error())
-	} else if !verified {
-		return User{}, fmt.Errorf("Modify_User >> Password Missmatched for %s", _username)
-	}
-
-	//=====================================
+func (s *SmartContract) Modify_User(ctx contractapi.TransactionContextInterface, uid string, name string, status int) (User, error) {
 
 	key := "user" + "_" + uid
 	user := new(User)
@@ -230,12 +226,16 @@ func (s *SmartContract) Modify_User(ctx contractapi.TransactionContextInterface,
 	}
 
 	//=====================================
-
+	temp_status := user.Status
+	if status != -1 {
+		temp_status = status
+	}
 	data := User{
 		Password: user.Password,
 		Name:     name,
 		UID:      user.UID,
-		Status:   user.Status,
+		Status:   temp_status,
+		Owned:    user.Owned,
 	}
 
 	marshaled_data, _ := json.Marshal(data)
@@ -247,22 +247,13 @@ func (s *SmartContract) Modify_User(ctx contractapi.TransactionContextInterface,
 	return data, nil
 }
 
-func (s *SmartContract) Create_Estate(ctx contractapi.TransactionContextInterface, _username string, _password string, serveyNo string, owner string, location string, area int, purchasedOn string, transactionsCount int) (Estate, error) {
-	verified, err0 := s.verifyPassword(ctx, _username, _password)
-
-	if err0 != nil {
-		return Estate{}, fmt.Errorf("verifyPassword >> Verify password %s", err0.Error())
-	} else if !verified {
-		return Estate{}, fmt.Errorf("Create_Estate >> Password Missmatched for %s", _username)
-	}
-
-	//=====================================
+func (s *SmartContract) Create_Estate(ctx contractapi.TransactionContextInterface, officeCode string, serveyNo string, owner string, location string, area int, purchasedOn string, transactionsCount int) (Estate, error) {
 
 	key := "estate" + "_" + serveyNo
 	temp_dateTime, _ := time.Parse(time.RFC3339, purchasedOn) // purchasedOn => 2021-12-15T20:34:33+05:30
 	data := Estate{
 		Owner:             owner,
-		OfficeCode:        strings.TrimPrefix(_username, "admin_"),
+		OfficeCode:        officeCode,
 		Location:          location,
 		Area:              area,
 		Status:            0,
@@ -318,16 +309,7 @@ func (s *SmartContract) Create_Estate(ctx contractapi.TransactionContextInterfac
 	return data, nil
 }
 
-func (s *SmartContract) Modify_Estate(ctx contractapi.TransactionContextInterface, _username string, _password string, serveyNo string, location string, area int, purchasedOn string, transactionsCount int) (Estate, error) {
-	verified, err0 := s.verifyPassword(ctx, _username, _password)
-
-	if err0 != nil {
-		return Estate{}, fmt.Errorf("verifyPassword >> Verify password %s", err0.Error())
-	} else if !verified {
-		return Estate{}, fmt.Errorf("Modify_Estate >> Password Missmatched for %s", _username)
-	}
-
-	//=====================================
+func (s *SmartContract) Modify_Estate(ctx contractapi.TransactionContextInterface, officeCode string, serveyNo string, location string, area int, purchasedOn string, transactionsCount int) (Estate, error) {
 
 	// get data
 	key := "estate" + "_" + serveyNo
@@ -367,7 +349,7 @@ func (s *SmartContract) Modify_Estate(ctx contractapi.TransactionContextInterfac
 
 	data := Estate{
 		Owner:             estate.Owner,
-		OfficeCode:        strings.TrimPrefix(_username, "admin_"),
+		OfficeCode:        officeCode,
 		Location:          location,
 		Area:              area,
 		Status:            estate.Status,
@@ -541,22 +523,25 @@ func (s *SmartContract) ApproveSell_Estate(ctx contractapi.TransactionContextInt
 		return *estate, fmt.Errorf("ApproveSell_Estate >> Failed to put to world state. %s", err12.Error())
 	}
 
+	//=====================================
+	// remove from admin toApprove
+
+	temp_toApprove := admin.ToApprove
+	i1 := searchArray(temp_toApprove, key2)
+	admin.ToApprove = append(temp_toApprove[:i1], temp_toApprove[i1+1:]...)
+
+	marshaled_data4, _ := json.Marshal(admin)
+	err13 := ctx.GetStub().PutState(key3, marshaled_data4)
+	if err13 != nil {
+		return *estate, fmt.Errorf("ApproveSell_Estate >> failed to put to world state. %s", err13.Error())
+	}
+
 	return *estate, nil
 }
 
 // User
 
-func (s *SmartContract) ChangeAvail_Estate(ctx contractapi.TransactionContextInterface, _username string, _password string, serveyNo string, saleAvailibility bool) error {
-	verified, err0 := s.verifyPassword(ctx, _username, _password)
-
-	if err0 != nil {
-		return fmt.Errorf("verifyPassword >> Verify password %s", err0.Error())
-	} else if !verified {
-		return fmt.Errorf("ChangeAvail_Estate >> Password Missmatched for %s", _username)
-	}
-
-	//=====================================
-
+func (s *SmartContract) ChangeAvail_Estate(ctx contractapi.TransactionContextInterface, serveyNo string, saleAvailability bool) error {
 	// get data
 	key := "estate" + "_" + serveyNo
 	dataAsBytes, err1 := ctx.GetStub().GetState(key)
@@ -577,7 +562,7 @@ func (s *SmartContract) ChangeAvail_Estate(ctx contractapi.TransactionContextInt
 
 	//=====================================
 
-	estate.SaleAvailability = saleAvailibility
+	estate.SaleAvailability = saleAvailability
 
 	marshaled_data, _ := json.Marshal(estate)
 	err3 := ctx.GetStub().PutState(key, marshaled_data)
@@ -588,17 +573,7 @@ func (s *SmartContract) ChangeAvail_Estate(ctx contractapi.TransactionContextInt
 	return nil
 }
 
-func (s *SmartContract) RequestToBuy_Estate(ctx contractapi.TransactionContextInterface, _username string, _password string, serveyNo string, proposedPrice int, dateTime string) (Request, error) {
-	verified, err0 := s.verifyPassword(ctx, _username, _password)
-
-	if err0 != nil {
-		return Request{}, fmt.Errorf("verifyPassword >> Verify password %s", err0.Error())
-	} else if !verified {
-		return Request{}, fmt.Errorf("RequestToBuy_Estate >> Password Missmatched for %s", _username)
-	}
-
-	//=====================================
-
+func (s *SmartContract) RequestToBuy_Estate(ctx contractapi.TransactionContextInterface, _buyer string, serveyNo string, proposedPrice int, dateTime string) (Request, error) {
 	// get data
 	key := "estate" + "_" + serveyNo
 	dataAsBytes, err1 := ctx.GetStub().GetState(key)
@@ -620,13 +595,12 @@ func (s *SmartContract) RequestToBuy_Estate(ctx contractapi.TransactionContextIn
 	//=====================================
 
 	temp_requests := estate.Requests
-	temp_buyer := strings.TrimPrefix(_username, "user_")
 	temp_dateTime, _ := time.Parse(time.RFC3339, dateTime)
 
 	flag := false
 	index := 0
 	for i, r := range temp_requests {
-		if r.Buyer == temp_buyer {
+		if r.Buyer == _buyer {
 			temp_requests[i].ProposedPrice = proposedPrice
 			temp_requests[i].DateTime = temp_dateTime
 			flag = true
@@ -637,7 +611,7 @@ func (s *SmartContract) RequestToBuy_Estate(ctx contractapi.TransactionContextIn
 
 	if !flag {
 		temp_requests = append(temp_requests, Request{
-			Buyer:         temp_buyer,
+			Buyer:         _buyer,
 			ProposedPrice: proposedPrice,
 			DateTime:      temp_dateTime,
 		})
@@ -656,7 +630,7 @@ func (s *SmartContract) RequestToBuy_Estate(ctx contractapi.TransactionContextIn
 	return temp_requests[index], nil
 }
 
-func (s *SmartContract) AcceptRequest_Estate(ctx contractapi.TransactionContextInterface, _username string, _password string, serveyNo string, buyer string, dateTime string) (Transaction, error) {
+func (s *SmartContract) AcceptRequest_Estate(ctx contractapi.TransactionContextInterface, _username string, _password string, serveyNo string, buyer string, dateTime string, reason string) (Transaction, error) {
 	verified, err0 := s.verifyPassword(ctx, _username, _password)
 
 	if err0 != nil {
@@ -709,7 +683,7 @@ func (s *SmartContract) AcceptRequest_Estate(ctx contractapi.TransactionContextI
 	}
 
 	if !flag {
-		return Transaction{}, fmt.Errorf("AcceptRequest_Estate >> No request found for give buyer: %s", buyer)
+		return Transaction{}, fmt.Errorf("AcceptRequest_Estate >> No request found for given buyer: %s", buyer)
 	}
 
 	temp_dateTime, _ := time.Parse(time.RFC3339, dateTime)
@@ -721,6 +695,7 @@ func (s *SmartContract) AcceptRequest_Estate(ctx contractapi.TransactionContextI
 		ApprovedBy:          "",
 		ApprovedDateTime:    time.Time{},
 		Price:               estate.Requests[index].ProposedPrice,
+		Reason:              reason,
 	}
 
 	key2 := "transaction" + "_" + serveyNo + "_" + strconv.Itoa(estate.TransactionsCount+1)
@@ -738,6 +713,49 @@ func (s *SmartContract) AcceptRequest_Estate(ctx contractapi.TransactionContextI
 	if err3 != nil {
 		return Transaction{}, fmt.Errorf("AcceptRequest_Estate >> failed to put to world state. %s", err3.Error())
 	}
+
+	//=====================================
+	// add request in toApprove of admin
+
+	key3 := "admin" + "_" + estate.OfficeCode
+	dataAsBytes1, err4 := ctx.GetStub().GetState(key3)
+
+	if err4 != nil {
+		return Transaction{}, fmt.Errorf("AcceptRequest_Estate >> Failed to read from world state. %s", err4.Error())
+	}
+
+	if dataAsBytes1 == nil {
+		return Transaction{}, fmt.Errorf("AcceptRequest_Estate >> %s does not exist", key3)
+	}
+
+	admin := new(Admin_OfficeCode)
+	err5 := json.Unmarshal(dataAsBytes1, &admin)
+	if err5 != nil {
+		return Transaction{}, fmt.Errorf("AcceptRequest_Estate >> Can't Unmarshal Data")
+	}
+
+	admin.ToApprove = append(admin.ToApprove, key2)
+
+	marshaled_data2, _ := json.Marshal(admin)
+	err6 := ctx.GetStub().PutState(key3, marshaled_data2)
+	if err6 != nil {
+		return Transaction{}, fmt.Errorf("AcceptRequest_Estate >> failed to put to world state. %s", err6.Error())
+	}
+
+	//=====================================
+	// set event
+
+	/*
+		transaction_event := Transaction_Event{
+			ServeyNo:         serveyNo,
+			TransactionCount: estate.TransactionsCount + 1,
+			Transaction:      temp_transaction,
+		}
+
+		marshaled_data3, _ := json.Marshal(transaction_event)
+
+		ctx.GetStub().SetEvent("newEstateSell", marshaled_data3)
+	*/
 
 	return temp_transaction, nil
 }
@@ -872,46 +890,42 @@ func (s *SmartContract) DeleteValue(ctx contractapi.TransactionContextInterface,
 	return nil
 }
 
-func (s *SmartContract) GetAll(ctx contractapi.TransactionContextInterface, startKey string, endKey string) error {
+func (s *SmartContract) GetAll(ctx contractapi.TransactionContextInterface, startKey string, endKey string) ([]string, error) {
 
 	resultsIterator, err0 := ctx.GetStub().GetStateByRange(startKey, endKey)
 
+	arrMap := []string{}
+
 	if err0 != nil {
-		return err0
+		return arrMap, err0
 	}
 	defer resultsIterator.Close()
-
-	// count := 0
-	// for resultsIterator.HasNext() {
-	// 	count++
-	// }
-	// allValues := make([]map[string]interface{}, count)
 
 	for resultsIterator.HasNext() {
 		queryResponse, err1 := resultsIterator.Next()
 
 		if err1 != nil {
-			return err1
+			return arrMap, err1
 		}
 
-		data := make(map[string]interface{})
-		err2 := json.Unmarshal(queryResponse.Value, &data)
-		if err2 != nil {
-			return fmt.Errorf("GetAll >> Can't Unmarshal Data")
-		}
+		// data := make(map[string]interface{})
+		// err2 := json.Unmarshal(queryResponse.Value, &data)
+		// if err2 != nil {
+		// 	return arrMap, fmt.Errorf("GetAll >> Can't Unmarshal Data")
+		// }
+
+		data := string(queryResponse.Value)
 
 		fmt.Println("=====================================")
 		fmt.Println("Key: "+queryResponse.Key+", Value: ", data)
 		fmt.Println("=====================================")
 
-		// data["Key"] = queryResponse.Key
-		// data["Values"] ueryResponse.Value
-		// allValues = append(allValues, data)
+		arrMap = append(arrMap, "Key: "+string(queryResponse.Key)+", Value: "+data)
 	}
 
 	fmt.Print("\n")
 
-	return nil
+	return arrMap, nil
 }
 
 // ------------------------------------
