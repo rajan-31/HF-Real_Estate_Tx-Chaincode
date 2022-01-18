@@ -369,6 +369,31 @@ func (s *SmartContract) Modify_Estate(ctx contractapi.TransactionContextInterfac
 	return data, nil
 }
 
+func (s *SmartContract) Add_Transaction(ctx contractapi.TransactionContextInterface, serveyNo string, num int, seller string, buyer string, reason string, proposedPrice int, tDateTime string, officeCode string, approvedBy string, aDateTime string) (Transaction, error) {
+	key := "transaction" + "_" + serveyNo + "_" + strconv.Itoa(num)
+
+	temp_tDateTime, _ := time.Parse(time.RFC3339, tDateTime)
+	temp_aDateTime, _ := time.Parse(time.RFC3339, aDateTime)
+	data := Transaction{
+		Seller:              seller,
+		Buyer:               buyer,
+		TransactionDateTime: temp_tDateTime,
+		OfficeCode:          officeCode,
+		ApprovedBy:          approvedBy,
+		ApprovedDateTime:    temp_aDateTime,
+		Price:               proposedPrice,
+		Reason:              reason,
+	}
+
+	marshaled_data0, _ := json.Marshal(data)
+	err0 := ctx.GetStub().PutState(key, marshaled_data0)
+	if err0 != nil {
+		return Transaction{}, fmt.Errorf("Add_Transaction >> failed to put to world state. %s", err0.Error())
+	}
+
+	return data, nil
+}
+
 func (s *SmartContract) ApproveSell_Estate(ctx contractapi.TransactionContextInterface, _username string, _password string, serveyNo string, dateTime string) (Estate, error) {
 	verified, err0 := s.verifyPassword(ctx, _username, _password)
 
